@@ -152,7 +152,9 @@ class ServiceSelectorsCollector:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help=f"server port"
     )
@@ -192,7 +194,7 @@ if __name__ == "__main__":
         LOG.debug("No %s found, trying incluster config", args.kubeconfig)
         k8s_config.load_incluster_config()
 
-    arg_namespaces = list(map(lambda x: x.strip(), args.namespaces.split(",")))
+    arg_namespaces = [x.strip() for x in args.namespaces.split(",") if x.strip()]
     if arg_namespaces:
         LOG.debug("Target namespaces - %s", arg_namespaces)
     else:
