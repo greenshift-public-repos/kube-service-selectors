@@ -2,7 +2,6 @@ name: CI
 
 permissions:
   contents: read
-  id-token: write
 
 on:
   pull_request:
@@ -44,7 +43,8 @@ jobs:
 
           for (( i=1; i<=3; i++ )); do
             echo "::group::az login (attempt ${i})"
-            if az-login; then exit 0; fi
+            if az-login; then echo "::endgroup::"; exit 0; fi
+            echo "::endgroup::"
             sleep 10
           done
           exit 1
@@ -54,28 +54,26 @@ jobs:
 
       - name: Set environment variables
         run: |
-          GIT_HASH="${{ github.sha }}"
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            GIT_HASH="${{ github.event.pull_request.head.sha }}"
-          fi
-          echo "GIT_HASH=${GIT_HASH}" >> "$GITHUB_ENV"
+          echo "GIT_HASH=${{ github.sha }}" >> "$GITHUB_ENV"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
+            echo "VERSION=${TAG}" >> "$GITHUB_ENV"
           fi
 
       - name: Build and push image
         run: bash build.sh -r "${{ vars.ACR_NAME }}.azurecr.io"
 
-      - name: Tag image with release tag
+      - name: Push release tag to public registry
         if: env.RELEASE_TAG != ''
         run: |
           set -eo pipefail
-          az acr login --name greenshiftprod
-          PROD_REGISTRY="greenshiftprod-fngqhpbnejeahre7.azurecr.io"
+          PUBLIC_REGISTRY="greenshiftpublic-bxchgyh9gcdzcxbh.azurecr.io"
+          az acr login --name "${PUBLIC_REGISTRY%.azurecr.io}"
           IMAGE=kube-service-selectors
           docker pull "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}"
-          docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${PROD_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
-          docker push "${PROD_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+          docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+          docker push "${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
 
       - name: Tag release in dev ACR for ACC
         if: env.RELEASE_TAG != ''
