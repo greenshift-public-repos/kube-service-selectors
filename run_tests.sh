@@ -3,6 +3,7 @@ set -e
 
 TEST_IMAGE=kube-service-selectors-tests:build
 
+bash build.sh
 docker build -t ${TEST_IMAGE} -f Dockerfile_tests .
 
 echo "Black check>>>"
