@@ -1,8 +1,7 @@
-import unittest
+import pytest
 
 from dataclasses import dataclass
-from prometheus_client.metrics_core import GaugeMetricFamily
-from unittest.mock import MagicMock
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
 from kube_service_selectors.main import (
     ServiceSelectorsCollector,
@@ -14,7 +13,7 @@ from kube_service_selectors.utils import LABEL_PREFIX
 
 @dataclass
 class V1ServiceSpecMock:
-    selector: dict[str, str]
+    selector: dict[str, str] | None
 
 
 @dataclass
@@ -41,152 +40,202 @@ class ServiceListResponseMock:
     metadata: V1ListMetaMock
 
 
-class TestServiceSelectorsCollector(unittest.TestCase):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.k8s_client_mock = MagicMock()
-        self.namespaces = ["default"]
-        self.collector = ServiceSelectorsCollector(self.k8s_client_mock)
-        self.namespaced_collector = ServiceSelectorsCollector(
-            self.k8s_client_mock, namespaces=self.namespaces
-        )
+def make_service(name, namespace, uid, selector):
+    return V1ServiceMock(
+        metadata=V1ObjectMetaMock(name, namespace, uid),
+        spec=V1ServiceSpecMock(selector),
+    )
 
-    def check_result(
-        self,
-        result: GaugeMetricFamily,
-        mocked_response: ServiceListResponseMock,
-    ):
-        self.assertTrue(result is not None)
-        services_count = len(mocked_response.items)
-        self.assertEqual(len(result.samples), services_count)
-        for sample in result.samples:
-            required_labels = {}
-            optional_labels = {}
-            for k, v in sample.labels.items():
-                if k in DEFAULT_LABELS:
-                    required_labels[k] = v
-                else:
-                    optional_labels[k] = v
-            self.assertEqual(len(required_labels), len(DEFAULT_LABELS))
-            self.assertTrue(
-                all(
-                    map(
-                        lambda x: x.startswith(LABEL_PREFIX),
-                        optional_labels.keys(),
-                    )
-                )
+
+def make_response(items, _continue=None):
+    return ServiceListResponseMock(items, V1ListMetaMock(_continue))
+
+
+def check_gauge(gauge, expected_count):
+    assert gauge is not None
+    assert isinstance(gauge, GaugeMetricFamily)
+    assert len(gauge.samples) == expected_count
+    for sample in gauge.samples:
+        required = {
+            k: v for k, v in sample.labels.items() if k in DEFAULT_LABELS
+        }
+        optional = {
+            k: v for k, v in sample.labels.items() if k not in DEFAULT_LABELS
+        }
+        assert len(required) == len(DEFAULT_LABELS)
+        assert all(k.startswith(LABEL_PREFIX) for k in optional)
+
+
+def get_counter_values(counter):
+    return {s.labels["result"]: s.value for s in counter.samples}
+
+
+def test_all_namespaces_no_services(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response([])
+    gauge, counter = list(collector.collect())
+    check_gauge(gauge, 0)
+    assert isinstance(counter, CounterMetricFamily)
+
+
+def test_namespaced_no_services(namespaced_collector, k8s_client):
+    k8s_client.list_namespaced_service.return_value = make_response([])
+    gauge, counter = list(namespaced_collector.collect())
+    check_gauge(gauge, 0)
+    assert isinstance(counter, CounterMetricFamily)
+
+
+def test_all_namespaces_single_service(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response(
+        [make_service("name", "namespace", "uid", {"key": "value"})]
+    )
+    gauge, counter = list(collector.collect())
+    check_gauge(gauge, 1)
+
+
+def test_namespaced_single_service(namespaced_collector, k8s_client):
+    k8s_client.list_namespaced_service.return_value = make_response(
+        [make_service("name", "namespace", "uid", {"key": "value"})]
+    )
+    gauge, counter = list(namespaced_collector.collect())
+    check_gauge(gauge, 1)
+
+
+def test_all_namespaces_pagination(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.side_effect = [
+        make_response(
+            [
+                make_service(f"n{i}", f"ns{i}", f"uid{i}", {f"k{i}": f"v{i}"})
+                for i in range(DEFAULT_LIMIT)
+            ],
+            _continue="token",
+        ),
+        make_response(
+            [
+                make_service(f"n{i}", f"ns{i}", f"uid{i}", {f"k{i}": f"v{i}"})
+                for i in range(DEFAULT_LIMIT, DEFAULT_LIMIT * 2)
+            ]
+        ),
+    ]
+    gauge, _ = list(collector.collect())
+    check_gauge(gauge, DEFAULT_LIMIT * 2)
+
+
+def test_namespaced_pagination(namespaced_collector, k8s_client):
+    k8s_client.list_namespaced_service.side_effect = [
+        make_response(
+            [
+                make_service(f"n{i}", f"ns{i}", f"uid{i}", {f"k{i}": f"v{i}"})
+                for i in range(DEFAULT_LIMIT)
+            ],
+            _continue="token",
+        ),
+        make_response(
+            [
+                make_service(f"n{i}", f"ns{i}", f"uid{i}", {f"k{i}": f"v{i}"})
+                for i in range(DEFAULT_LIMIT, DEFAULT_LIMIT * 2)
+            ]
+        ),
+    ]
+    gauge, _ = list(namespaced_collector.collect())
+    check_gauge(gauge, DEFAULT_LIMIT * 2)
+
+
+def test_service_with_none_selector(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response(
+        [make_service("headless", "default", "uid-1", None)]
+    )
+    gauge, _ = list(collector.collect())
+    check_gauge(gauge, 1)
+    sample = gauge.samples[0]
+    assert sample.labels["service"] == "headless"
+    assert sample.labels["namespace"] == "default"
+    assert sample.labels["uid"] == "uid-1"
+    assert all(k in DEFAULT_LABELS for k in sample.labels)
+
+
+def test_service_labels_in_metric(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response(
+        [make_service("my-svc", "my-ns", "my-uid", {"app": "nginx"})]
+    )
+    gauge, _ = list(collector.collect())
+    sample = gauge.samples[0]
+    assert sample.labels["service"] == "my-svc"
+    assert sample.labels["namespace"] == "my-ns"
+    assert sample.labels["uid"] == "my-uid"
+    assert sample.labels["label_app"] == "nginx"
+    assert sample.value == 1.0
+
+
+def test_success_counter_values(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response([])
+    _, counter = list(collector.collect())
+    values = get_counter_values(counter)
+    assert values["succeeded"] == 1
+    assert values["failed"] == 0
+
+
+def test_collect_exception_yields_failed_counter(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.side_effect = RuntimeError(
+        "API error"
+    )
+    results = list(collector.collect())
+    assert len(results) == 1
+    counter = results[0]
+    assert isinstance(counter, CounterMetricFamily)
+    values = get_counter_values(counter)
+    assert values["failed"] == 1
+
+
+def test_counter_accumulates_across_calls(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response([])
+    list(collector.collect())
+    _, counter = list(collector.collect())
+    values = get_counter_values(counter)
+    assert values["succeeded"] == 2
+    assert values["failed"] == 0
+
+
+def test_multiple_namespaces(k8s_client):
+    coll = ServiceSelectorsCollector(k8s_client, namespaces=["ns1", "ns2"])
+    k8s_client.list_namespaced_service.side_effect = [
+        make_response([make_service("svc1", "ns1", "uid1", {"k": "v"})]),
+        make_response([make_service("svc2", "ns2", "uid2", {"k": "v"})]),
+    ]
+    gauge, _ = list(coll.collect())
+    check_gauge(gauge, 2)
+    assert k8s_client.list_namespaced_service.call_count == 2
+
+
+def test_multiple_services_same_selector_shape(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response(
+        [
+            make_service("svc1", "ns", "uid1", {"app": "a", "env": "prod"}),
+            make_service("svc2", "ns", "uid2", {"app": "b", "env": "staging"}),
+        ]
+    )
+    gauge, _ = list(collector.collect())
+    check_gauge(gauge, 2)
+
+
+def test_service_with_conflicting_selector_labels(collector, k8s_client):
+    k8s_client.list_service_for_all_namespaces.return_value = make_response(
+        [
+            make_service(
+                "svc", "ns", "uid", {"key.name": "v1", "key_name": "v2"}
             )
+        ]
+    )
+    gauge, _ = list(collector.collect())
+    check_gauge(gauge, 1)
+    sample = gauge.samples[0]
+    conflict_keys = [k for k in sample.labels if k.startswith(LABEL_PREFIX)]
+    assert len(conflict_keys) == 2
+    assert all("conflict" in k for k in conflict_keys)
 
-    def test_all_namespaces_no_services(self):
-        k8s_response = ServiceListResponseMock([], V1ListMetaMock())
-        self.k8s_client_mock.list_service_for_all_namespaces.return_value = (
-            k8s_response
-        )
-        res = next(self.collector.collect(), None)
-        self.check_result(res, k8s_response)
 
-    def test_namespaced_no_services(self):
-        k8s_response = ServiceListResponseMock([], V1ListMetaMock())
-        self.k8s_client_mock.list_namespaced_service.return_value = (
-            k8s_response
-        )
-        res = next(self.namespaced_collector.collect(), None)
-        self.check_result(res, k8s_response)
-
-    def test_all_namespaces(self):
-        k8s_response = ServiceListResponseMock(
-            [
-                V1ServiceMock(
-                    V1ObjectMetaMock("name", "namespace", "uid"),
-                    V1ServiceSpecMock({"key": "value"}),
-                )
-            ],
-            V1ListMetaMock(),
-        )
-        self.k8s_client_mock.list_service_for_all_namespaces.return_value = (
-            k8s_response
-        )
-        res = next(self.collector.collect(), None)
-        self.check_result(res, k8s_response)
-
-    def test_namespaced(self):
-        k8s_response = ServiceListResponseMock(
-            [
-                V1ServiceMock(
-                    V1ObjectMetaMock("name", "namespace", "uid"),
-                    V1ServiceSpecMock({"key": "value"}),
-                )
-            ],
-            V1ListMetaMock(),
-        )
-        self.k8s_client_mock.list_namespaced_service.return_value = (
-            k8s_response
-        )
-        res = next(self.namespaced_collector.collect(), None)
-        self.check_result(res, k8s_response)
-
-    def test_all_namespaces_limit(self):
-        k8s_response_1 = ServiceListResponseMock(
-            [
-                V1ServiceMock(
-                    V1ObjectMetaMock(
-                        f"name_{i}", f"namespace_{i}", f"uid_{i}"
-                    ),
-                    V1ServiceSpecMock({f"key_{i}": f"value_{i}"}),
-                )
-                for i in range(DEFAULT_LIMIT)
-            ],
-            V1ListMetaMock("token"),
-        )
-        k8s_response_2 = ServiceListResponseMock(
-            [
-                V1ServiceMock(
-                    V1ObjectMetaMock(
-                        f"name_{i}", f"namespace_{i}", f"uid_{i}"
-                    ),
-                    V1ServiceSpecMock({f"key_{i}": f"value_{i}"}),
-                )
-                for i in range(DEFAULT_LIMIT, DEFAULT_LIMIT * 2)
-            ],
-            V1ListMetaMock(),
-        )
-        self.k8s_client_mock.list_service_for_all_namespaces.side_effect = (
-            k8s_response_1,
-            k8s_response_2,
-        )
-        res = next(self.collector.collect(), None)
-        k8s_response_1.items.extend(k8s_response_2.items)
-        self.check_result(res, k8s_response_1)
-
-    def test_namespaced_limit(self):
-        k8s_response_1 = ServiceListResponseMock(
-            [
-                V1ServiceMock(
-                    V1ObjectMetaMock(
-                        f"name_{i}", f"namespace_{i}", f"uid_{i}"
-                    ),
-                    V1ServiceSpecMock({f"key_{i}": f"value_{i}"}),
-                )
-                for i in range(DEFAULT_LIMIT)
-            ],
-            V1ListMetaMock("token"),
-        )
-        k8s_response_2 = ServiceListResponseMock(
-            [
-                V1ServiceMock(
-                    V1ObjectMetaMock(
-                        f"name_{i}", f"namespace_{i}", f"uid_{i}"
-                    ),
-                    V1ServiceSpecMock({f"key_{i}": f"value_{i}"}),
-                )
-                for i in range(DEFAULT_LIMIT, DEFAULT_LIMIT * 2)
-            ],
-            V1ListMetaMock(),
-        )
-        self.k8s_client_mock.list_namespaced_service.side_effect = (
-            k8s_response_1,
-            k8s_response_2,
-        )
-        res = next(self.namespaced_collector.collect(), None)
-        k8s_response_1.items.extend(k8s_response_2.items)
-        self.check_result(res, k8s_response_1)
+def test_collector_with_timeout(k8s_client):
+    coll = ServiceSelectorsCollector(k8s_client, timeout=5)
+    k8s_client.list_service_for_all_namespaces.return_value = make_response([])
+    gauge, _ = list(coll.collect())
+    call_kwargs = k8s_client.list_service_for_all_namespaces.call_args.kwargs
+    assert call_kwargs["_request_timeout"] == 5
