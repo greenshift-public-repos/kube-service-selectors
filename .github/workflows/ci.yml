@@ -1,0 +1,87 @@
+name: CI
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          mkdir -p reports
+          bash run_tests.sh
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        run: |
+          az cloud set -n azurecloud
+
+          az-login() {
+            az login --service-principal \
+              --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" \
+              --password "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" \
+              --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')"
+          }
+
+          for (( i=1; i<=3; i++ )); do
+            echo "::group::az login (attempt ${i})"
+            if az-login; then exit 0; fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Set environment variables
+        run: |
+          GIT_HASH="${{ github.sha }}"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            GIT_HASH="${{ github.event.pull_request.head.sha }}"
+          fi
+          echo "GIT_HASH=${GIT_HASH}" >> "$GITHUB_ENV"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and push image
+        run: bash build.sh -r "${{ vars.ACR_NAME }}.azurecr.io"
+
+      - name: Tag image with release tag
+        if: env.RELEASE_TAG != ''
+        run: |
+          set -eo pipefail
+          az acr login --name greenshiftprod
+          PROD_REGISTRY="greenshiftprod-fngqhpbnejeahre7.azurecr.io"
+          IMAGE=kube-service-selectors
+          docker pull "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}"
+          docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${PROD_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+          docker push "${PROD_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+
+      - name: Tag release in dev ACR for ACC
+        if: env.RELEASE_TAG != ''
+        run: |
+          set -eo pipefail
+          IMAGE=kube-service-selectors
+          docker pull "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}"
+          docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${RELEASE_TAG}"
+          docker push "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${RELEASE_TAG}"
