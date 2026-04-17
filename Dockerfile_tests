@@ -4,7 +4,6 @@ LABEL org.opencontainers.image.authors="Greenshift <contact@greenshift.app>"
 
 COPY .coveragerc ./
 COPY pyproject.toml uv.lock ./
-COPY unittest.cfg ./
 
 RUN uv sync --frozen --no-cache --extra dev
 

@@ -14,9 +14,9 @@ echo "PEP8 tests>>>"
 docker run -i --entrypoint pycodestyle --rm ${TEST_IMAGE} --show-pep8 --exclude=.venv .
 echo "<<<PEP8 tests"
 
-echo "Nose tests>>>"
+echo "Pytest>>>"
 docker run -i -v $PWD/reports:/usr/src/app/reports \
-  --entrypoint nose2 --rm ${TEST_IMAGE}
-echo "<<Nose tests"
+  --entrypoint pytest --rm ${TEST_IMAGE}
+echo "<<<Pytest"
 
 docker rmi ${TEST_IMAGE}
