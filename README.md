@@ -1,48 +1,74 @@
 Kubernetes services selectors exporter
 ====
-Exports Kubernetes services selectors as metrics.
+Exports Kubernetes services selectors as Prometheus metrics.
 
-Uses Kubernetes API to collect services info.
+Uses the Kubernetes API to collect service info and converts selector labels to Prometheus-compatible label names.
 
-[Source Code](https://github.com/hystax/kube-service-selectors) | [Docker Image](https://hub.docker.com/r/hystax/kube-service-selectors) | [Helm chart](https://github.com/hystax/helm-charts/tree/main/charts/kube-service-selectors)
+[Source Code](https://github.com/greenshift-public-repos/kube-service-selectors) | [Helm chart](https://github.com/greenshift-public-repos/helm-charts/tree/main/charts/kube-service-selectors)
 
-## Metrics description
-| Metric name| Metric type | Description | Labels/tags |
-| ---------- | ----------- | ----------- | ----------- |
-| kube_service_selectors | Gauge | Kubernetes selectors converted to Prometheus labels | `service`=&lt;service-name&gt; <br> `namespace`=&lt;service-namespace&gt; <br> `uid`=&lt;service-uid&gt; <br> `label_SELECTOR_LABEL`=&lt;SELECTOR_LABEL&gt; |
-| kube_service_selectors_total | Counter | Counted exporter workflow result (succeeded and failed) | `result`=&lt;result&gt; |
+## Metrics
 
-kube_service_selectors transforms Kubernetes labels according to [Prometheus labels naming convention](https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels) and resolves possible conflicts in [kube-state-metrics](https://github.com/kubernetes/kube-state-metrics/blob/master/README.md#conflict-resolution-in-label-names) way.
+| Metric name | Metric type | Description | Labels |
+| ----------- | ----------- | ----------- | ------ |
+| `kube_service_selectors` | Gauge | Kubernetes service selectors converted to Prometheus labels | `service`=&lt;service-name&gt; `namespace`=&lt;service-namespace&gt; `uid`=&lt;service-uid&gt; `label_SELECTOR_LABEL`=&lt;value&gt; |
+| `kube_service_selectors_total` | Counter | Exporter workflow result per collection cycle | `result`=`succeeded`\|`failed` |
+
+Selector label keys are normalised to [Prometheus label naming conventions](https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels) (snake\_case, non-alphanumeric characters replaced with `_`) and conflicts are resolved the same way as [kube-state-metrics](https://github.com/kubernetes/kube-state-metrics/blob/master/README.md#conflict-resolution-in-label-names) — by appending a `_conflictN` suffix.
 
 ## Usage
+
 ```
 usage: main.py [-h] [--port PORT] [--namespaces NAMESPACES] [--debug DEBUG]
                [--timeout TIMEOUT] [--kubeconfig KUBECONFIG]
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
-  --port PORT           server port
+  --port PORT           server port (default: 30091)
   --namespaces NAMESPACES
-                        list of comma-separated namespaces (will be listed
-                        from all if not provided)
+                        comma-separated list of namespaces to watch
+                        (all namespaces if not provided)
   --debug DEBUG         enable debug logging
-  --timeout TIMEOUT     kubernetes requests timeout
+  --timeout TIMEOUT     Kubernetes API request timeout in seconds (default: 10)
   --kubeconfig KUBECONFIG
-                        kubernetes config file path. Service account will be
-                        used if config missing
+                        path to kubeconfig file; in-cluster service account
+                        credentials are used if the file is not found
 ```
+
+## CI/CD
+
+PRs run tests (black, pycodestyle, nose2) via Docker. Merges to `main` and `v*` tags additionally build and push the image to ACR, tagged with the commit SHA. Version tags also promote the image to the prod ACR and tag it in the dev ACR for ACC.
+
+Requires the following configured on the GitHub repo:
+- **Secret** `AZURE_CREDENTIALS` — service principal JSON with `AcrPush` on the ACR
+- **Variable** `ACR_NAME` — registry name (without `.azurecr.io`)
 
 ### From source
-The exporter requires Python 3.6 or above and Pip 3 to install requirements:
+
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+
 ```bash
-> pip3 install -r requirements.txt
-```
-By default server listens on 30091. Kubernetes config should be placed behind executable with `kubeconfig` name or passed as `--kubeconfig` argument when running outside Kubernetes:
-```bash
-> PYTHONPATH=.. python3 main.py --kubeconfig <kubeconfig_path>
+uv sync
+uv run python -m kube_service_selectors.main --kubeconfig <kubeconfig_path>
 ```
 
+By default the server listens on port **30091**. When running outside a cluster, pass a kubeconfig via `--kubeconfig`. Inside a cluster, omit it and the pod's service account credentials are used automatically.
+
 ### Using Docker
+
 ```bash
-> docker run -d -v <kubeconfig_path>:/usr/src/app/kube_service_selectors/kubeconfig -p 30091:30091 --name kss_exporter  hystax/kube-service-selectors
+docker run -d \
+  -v <kubeconfig_path>:/usr/src/app/kube_service_selectors/kubeconfig \
+  -p 30091:30091 \
+  --name kss_exporter \
+  greenshift/kube-service-selectors
+```
+
+To target specific namespaces:
+
+```bash
+docker run -d \
+  -v <kubeconfig_path>:/usr/src/app/kube_service_selectors/kubeconfig \
+  -p 30091:30091 \
+  --name kss_exporter \
+  greenshift/kube-service-selectors --namespaces default,kube-system
 ```
