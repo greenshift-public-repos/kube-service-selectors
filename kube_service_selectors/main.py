@@ -194,7 +194,9 @@ if __name__ == "__main__":
         LOG.debug("No %s found, trying incluster config", args.kubeconfig)
         k8s_config.load_incluster_config()
 
-    arg_namespaces = [x.strip() for x in args.namespaces.split(",") if x.strip()]
+    arg_namespaces = [
+        x.strip() for x in args.namespaces.split(",") if x.strip()
+    ]
     if arg_namespaces:
         LOG.debug("Target namespaces - %s", arg_namespaces)
     else:
