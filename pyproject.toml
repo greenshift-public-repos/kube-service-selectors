@@ -15,7 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "black==24.10.0",
-    "coverage==6.4.4",
+    "coverage==7.13.5",
     "nose2==0.12.0",
     "pycodestyle==2.9.1",
     "pytest==7.1.2",
