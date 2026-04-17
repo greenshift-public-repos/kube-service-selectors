@@ -36,7 +36,7 @@ options:
 
 ## CI/CD
 
-PRs run tests (black, pycodestyle, nose2) via Docker. Merges to `main` and `v*` tags additionally build and push the image to ACR, tagged with the commit SHA. Version tags also promote the image to the prod ACR and tag it in the dev ACR for ACC.
+PRs run tests (black, pycodestyle, nose2) via Docker. Merges to `main` and `v*` tags additionally build and push the image to ACR, tagged with the commit SHA. Version tags also push the image to the public ACR and tag it in the dev ACR for ACC.
 
 Requires the following configured on the GitHub repo:
 - **Secret** `AZURE_CREDENTIALS` — service principal JSON with `AcrPush` on the ACR

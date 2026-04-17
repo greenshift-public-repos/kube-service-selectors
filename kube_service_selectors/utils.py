@@ -35,7 +35,7 @@ class Conflict:
 
 
 def map_to_prometheus_labels(
-    labels: Dict[str, str]
+    labels: Dict[str, str],
 ) -> Tuple[List[str], List[str]]:
     label_keys = []
     label_values = []
