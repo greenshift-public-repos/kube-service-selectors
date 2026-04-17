@@ -36,9 +36,9 @@ jobs:
 
           az-login() {
             az login --service-principal \
-              --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" \
-              --password "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" \
-              --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')"
+              --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.appId')" \
+              --password "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.password')" \
+              --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenant')"
           }
 
           for (( i=1; i<=3; i++ )); do
