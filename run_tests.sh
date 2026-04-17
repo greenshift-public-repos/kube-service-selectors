@@ -10,11 +10,11 @@ docker run -i --entrypoint black --rm ${TEST_IMAGE} --check .
 echo "<<<Black check"
 
 echo "PEP8 tests>>>"
-docker run -i --entrypoint pycodestyle --rm ${TEST_IMAGE} --show-pep8 .
+docker run -i --entrypoint pycodestyle --rm ${TEST_IMAGE} --show-pep8 --exclude=.venv .
 echo "<<<PEP8 tests"
 
 echo "Nose tests>>>"
-docker run -i -v $PWD/reports:/usr/src/app/kube_service_selectors/reports \
+docker run -i -v $PWD/reports:/usr/src/app/reports \
   --entrypoint nose2 --rm ${TEST_IMAGE}
 echo "<<Nose tests"
 
