@@ -1,12 +1,11 @@
 ARG BUILDTAG=build
 FROM kube-service-selectors:${BUILDTAG}
-MAINTAINER Hystax
+LABEL org.opencontainers.image.authors="Greenshift <contact@greenshift.app>"
 
 COPY .coveragerc ./
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 COPY unittest.cfg ./
 
-COPY test-requirements.txt ./
-RUN pip install --no-cache-dir -r test-requirements.txt
+RUN uv sync --frozen --no-cache --extra dev
 
 COPY tests ./tests
