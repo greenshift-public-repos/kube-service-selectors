@@ -66,14 +66,13 @@ jobs:
           bash build.sh -r "${{ vars.ACR_NAME }}.azurecr.io"
           echo "Image pushed: ${{ vars.ACR_NAME }}.azurecr.io/kube-service-selectors:${GIT_HASH}"
 
-      - name: Push release tag to public registry
+      - name: Push release version tag
         if: env.RELEASE_TAG != ''
         run: |
           set -eo pipefail
-          PUBLIC_REGISTRY="${{ vars.ACR_NAME }}.azurecr.io"
-          az acr login --name "${PUBLIC_REGISTRY}"
+          REGISTRY="${{ vars.ACR_NAME }}.azurecr.io"
           IMAGE=kube-service-selectors
-          docker pull "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}"
-          docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
-          docker push "${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
-          echo "Image pushed: ${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+          docker pull "${REGISTRY}/${IMAGE}:${GIT_HASH}"
+          docker tag "${REGISTRY}/${IMAGE}:${GIT_HASH}" "${REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+          docker push "${REGISTRY}/${IMAGE}:${RELEASE_TAG}"
+          echo "Image pushed: ${REGISTRY}/${IMAGE}:${RELEASE_TAG}"
