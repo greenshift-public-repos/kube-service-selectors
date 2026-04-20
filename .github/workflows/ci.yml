@@ -54,7 +54,7 @@ jobs:
 
       - name: Set environment variables
         run: |
-          echo "GIT_HASH=${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "GIT_HASH=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
@@ -62,24 +62,18 @@ jobs:
           fi
 
       - name: Build and push image
-        run: bash build.sh -r "${{ vars.ACR_NAME }}.azurecr.io"
+        run: |
+          bash build.sh -r "${{ vars.ACR_NAME }}.azurecr.io"
+          echo "Image pushed: ${{ vars.ACR_NAME }}.azurecr.io/kube-service-selectors:${GIT_HASH}"
 
       - name: Push release tag to public registry
         if: env.RELEASE_TAG != ''
         run: |
           set -eo pipefail
-          PUBLIC_REGISTRY="greenshiftpublic-bxchgyh9gcdzcxbh.azurecr.io"
-          az acr login --name "${PUBLIC_REGISTRY%.azurecr.io}"
+          PUBLIC_REGISTRY="${{ vars.ACR_NAME }}.azurecr.io"
+          az acr login --name "${PUBLIC_REGISTRY}"
           IMAGE=kube-service-selectors
           docker pull "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}"
           docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
           docker push "${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"
-
-      - name: Tag release in dev ACR for ACC
-        if: env.RELEASE_TAG != ''
-        run: |
-          set -eo pipefail
-          IMAGE=kube-service-selectors
-          docker pull "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}"
-          docker tag "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${GIT_HASH}" "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${RELEASE_TAG}"
-          docker push "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE}:${RELEASE_TAG}"
+          echo "Image pushed: ${PUBLIC_REGISTRY}/${IMAGE}:${RELEASE_TAG}"

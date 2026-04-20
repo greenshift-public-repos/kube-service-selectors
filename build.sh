@@ -11,7 +11,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-GIT_HASH=${GIT_HASH:-$(git rev-parse HEAD)}
+GIT_HASH=${GIT_HASH:-$(git rev-parse --short HEAD)}
 
 docker build -t "${IMAGE_NAME}:build" \
   --label commit="${GIT_HASH}" \
