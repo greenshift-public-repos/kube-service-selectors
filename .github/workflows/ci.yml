@@ -50,7 +50,7 @@ jobs:
           exit 1
 
       - name: Log in to ACR
-        run: az acr login --name ${{ vars.ACR_NAME }}
+        run: az acr login --name ${{ vars.ACR_NAME }}.azurecr.io
 
       - name: Set environment variables
         run: |
